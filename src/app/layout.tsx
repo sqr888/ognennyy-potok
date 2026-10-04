@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://ognennyy-potok.relaxdev.ru"),
   title: "Огненный поток — тренажёр",
   description:
     "Тренажёр для подготовки: экзамен на время, тест из 14 вопросов, свободная тренировка по темам.",
