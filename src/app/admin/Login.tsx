@@ -100,6 +100,11 @@ export default function Login({ onLoginSuccess }: Props) {
             ← На главную
           </Link>
         </div>
+
+        <p className="text-xs text-slate-400 mt-8 leading-relaxed">
+          «Огненный поток» — независимый неофициальный тренажёр. Не связан
+          с фирмой «1С».
+        </p>
       </div>
     </div>
   );

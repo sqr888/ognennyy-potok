@@ -647,6 +647,11 @@ export function QuizScreen({
             );
           })}
         </div>
+
+        <p className="text-xs text-slate-400 mt-8 text-center leading-relaxed">
+          «Огненный поток» — независимый неофициальный тренажёр.
+          Не связан с фирмой «1С».
+        </p>
       </div>
     );
   }
