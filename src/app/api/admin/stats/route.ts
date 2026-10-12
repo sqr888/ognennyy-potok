@@ -13,6 +13,25 @@ interface TopicStat {
   errorRate: number;
 }
 
+interface TopicTrainStat {
+  topicId: number;
+  topicTitle: string;
+  topicOrder: number;
+  attemptsCount: number;
+  totalAnswers: number;
+  totalCorrect: number;
+  totalIncorrect: number;
+  averagePercent: number;
+  /** Лучшая попытка: количество правильных ответов */
+  bestCorrect: number | null;
+  /** Худшая попытка: количество правильных ответов */
+  worstCorrect: number | null;
+  lastAnswers: number | null;
+  lastIncorrect: number | null;
+  lastPercent: number | null;
+  lastAt: string | null;
+}
+
 interface HardestQuestion {
   questionId: number;
   questionText: string;
@@ -33,13 +52,11 @@ export async function GET(req: NextRequest) {
   try {
     const modeParam = req.nextUrl.searchParams.get("mode");
     const mode: Mode | null =
-      modeParam === "test" ||
-      modeParam === "exam" ||
-      modeParam === "train"
+      modeParam === "test" || modeParam === "exam" || modeParam === "train"
         ? modeParam
         : null;
 
-    // ── 1. Сводка по попыткам ─────────────────────────────────────────────
+    // ── Сводка по попыткам (общая) ────────────────────────────────────────
     const summaryBase = db
       .select({
         totalAttempts: sql<number>`COUNT(*)::int`,
@@ -62,50 +79,175 @@ export async function GET(req: NextRequest) {
     const averagePercent =
       avgTotal > 0 ? Math.round((avgCorrect / avgTotal) * 100) : 0;
 
-    // Общий фрагмент WHERE для raw SQL — с фильтром по режиму, если задан
-    const modeFilter = mode
-      ? sql`AND att.mode = ${mode}`
-      : sql``;
+    const modeFilter = mode ? sql`AND att.mode = ${mode}` : sql``;
 
-    // ── 2. Статистика по темам ────────────────────────────────────────────
-    const topicRows = await db.execute(sql`
-      SELECT
-        t.id            AS topic_id,
-        t.title         AS topic_title,
-        t.order_index   AS topic_order,
-        COUNT(*)::int   AS total_answers,
-        SUM(CASE WHEN (a->>'isCorrect')::boolean = false THEN 1 ELSE 0 END)::int
-                        AS incorrect_answers
-      FROM attempts att
-      CROSS JOIN LATERAL jsonb_array_elements(att.answers) AS a
-      JOIN questions q ON q.id = (a->>'questionId')::int
-      JOIN topics    t ON t.id = q.topic_id
-      WHERE att.finished = true
-        AND jsonb_array_length(att.answers) > 0
-        ${modeFilter}
-      GROUP BY t.id, t.title, t.order_index
-      ORDER BY t.order_index ASC
-    `);
+    // ── Общая статистика по темам (для test/exam) ─────────────────────────
+    let byTopic: TopicStat[] = [];
 
-    const byTopic: TopicStat[] = (topicRows.rows as Array<{
-      topic_id: number;
-      topic_title: string;
-      topic_order: number;
-      total_answers: number;
-      incorrect_answers: number;
-    }>).map((r) => ({
-      topicId: r.topic_id,
-      topicTitle: r.topic_title,
-      topicOrder: r.topic_order,
-      totalAnswers: r.total_answers,
-      incorrectAnswers: r.incorrect_answers,
-      errorRate:
-        r.total_answers > 0
-          ? Math.round((r.incorrect_answers / r.total_answers) * 1000) / 10
-          : 0,
-    }));
+    if (mode !== "train") {
+      const topicRows = await db.execute(sql`
+        SELECT
+          t.id            AS topic_id,
+          t.title         AS topic_title,
+          t.order_index   AS topic_order,
+          COUNT(*)::int   AS total_answers,
+          SUM(CASE WHEN (a->>'isCorrect')::boolean = false THEN 1 ELSE 0 END)::int
+                          AS incorrect_answers
+        FROM attempts att
+        CROSS JOIN LATERAL jsonb_array_elements(att.answers) AS a
+        JOIN questions q ON q.id = (a->>'questionId')::int
+        JOIN topics    t ON t.id = q.topic_id
+        WHERE att.finished = true
+          AND jsonb_array_length(att.answers) > 0
+          ${modeFilter}
+        GROUP BY t.id, t.title, t.order_index
+        ORDER BY t.order_index ASC
+      `);
 
-    // ── 3. Топ самых ошибочных вопросов ───────────────────────────────────
+      byTopic = (topicRows.rows as Array<{
+        topic_id: number;
+        topic_title: string;
+        topic_order: number;
+        total_answers: number;
+        incorrect_answers: number;
+      }>).map((r) => ({
+        topicId: r.topic_id,
+        topicTitle: r.topic_title,
+        topicOrder: r.topic_order,
+        totalAnswers: r.total_answers,
+        incorrectAnswers: r.incorrect_answers,
+        errorRate:
+          r.total_answers > 0
+            ? Math.round((r.incorrect_answers / r.total_answers) * 1000) / 10
+            : 0,
+      }));
+    }
+
+    // ── Тренировка: статистика по темам (последняя + MAX/MIN) ─────────────
+    let byTopicTrain: TopicTrainStat[] = [];
+
+    if (mode === "train") {
+      const trainRows = await db.execute(sql`
+        WITH per_attempt_topic AS (
+          SELECT
+            att.id            AS attempt_id,
+            att.created_at    AS created_at,
+            t.id              AS topic_id,
+            t.title           AS topic_title,
+            t.order_index     AS topic_order,
+            COUNT(*)::int     AS answered,
+            SUM(CASE WHEN (a->>'isCorrect')::boolean = false THEN 1 ELSE 0 END)::int
+                              AS incorrect
+          FROM attempts att
+          CROSS JOIN LATERAL jsonb_array_elements(att.answers) AS a
+          JOIN questions q ON q.id = (a->>'questionId')::int
+          JOIN topics    t ON t.id = q.topic_id
+          WHERE att.finished = true
+            AND att.mode = 'train'
+            AND jsonb_array_length(att.answers) = att.total_count
+          GROUP BY att.id, att.created_at, t.id, t.title, t.order_index
+        ),
+        with_correct AS (
+          SELECT
+            *,
+            (answered - incorrect) AS correct
+          FROM per_attempt_topic
+        ),
+        agg AS (
+          SELECT
+            topic_id,
+            topic_title,
+            topic_order,
+            COUNT(*)::int                  AS attempts_count,
+            SUM(answered)::int             AS total_answers,
+            SUM(incorrect)::int            AS total_incorrect,
+            SUM(correct)::int              AS total_correct,
+            MAX(correct)::int              AS best_correct,
+            MIN(correct)::int              AS worst_correct
+          FROM with_correct
+          GROUP BY topic_id, topic_title, topic_order
+        ),
+        last_attempt AS (
+          SELECT DISTINCT ON (topic_id)
+            topic_id,
+            answered   AS last_answered,
+            incorrect  AS last_incorrect,
+            created_at AS last_at
+          FROM with_correct
+          ORDER BY topic_id, created_at DESC, attempt_id DESC
+        )
+        SELECT
+          agg.topic_id,
+          agg.topic_title,
+          agg.topic_order,
+          agg.attempts_count,
+          agg.total_answers,
+          agg.total_incorrect,
+          agg.total_correct,
+          agg.best_correct,
+          agg.worst_correct,
+          l.last_answered,
+          l.last_incorrect,
+          l.last_at
+        FROM agg
+        LEFT JOIN last_attempt l ON l.topic_id = agg.topic_id
+        ORDER BY agg.topic_order ASC
+      `);
+
+      byTopicTrain = (trainRows.rows as Array<{
+        topic_id: number;
+        topic_title: string;
+        topic_order: number;
+        attempts_count: number;
+        total_answers: number;
+        total_incorrect: number;
+        total_correct: number;
+        best_correct: number;
+        worst_correct: number;
+        last_answered: number | null;
+        last_incorrect: number | null;
+        last_at: string | Date | null;
+      }>).map((r) => {
+        const totalAnswers = Number(r.total_answers ?? 0);
+        const totalCorrect = Number(r.total_correct ?? 0);
+        const averagePercent =
+          totalAnswers > 0
+            ? Math.round((totalCorrect / totalAnswers) * 100)
+            : 0;
+
+        const lastAnswers =
+          r.last_answered === null ? null : Number(r.last_answered);
+        const lastIncorrect =
+          r.last_incorrect === null ? null : Number(r.last_incorrect);
+        const lastPercent =
+          lastAnswers && lastAnswers > 0 && lastIncorrect !== null
+            ? Math.round((lastIncorrect / lastAnswers) * 100)
+            : null;
+
+        return {
+          topicId: r.topic_id,
+          topicTitle: r.topic_title,
+          topicOrder: r.topic_order,
+          attemptsCount: r.attempts_count,
+          totalAnswers,
+          totalCorrect,
+          totalIncorrect: Number(r.total_incorrect ?? 0),
+          averagePercent,
+          bestCorrect:
+            r.best_correct === null ? null : Number(r.best_correct),
+          worstCorrect:
+            r.worst_correct === null ? null : Number(r.worst_correct),
+          lastAnswers,
+          lastIncorrect,
+          lastPercent,
+          lastAt: r.last_at ? new Date(r.last_at).toISOString() : null,
+        };
+      });
+    }
+
+    // ── Топ самых ошибочных вопросов ──────────────────────────────────────
+    // Сквозная статистика по всем режимам (test, exam, train) — не зависит
+    // от выбранной вкладки. Фильтр mode здесь НЕ применяется.
     const hardestRows = await db.execute(sql`
       SELECT
         q.id            AS question_id,
@@ -120,7 +262,6 @@ export async function GET(req: NextRequest) {
       JOIN topics    t ON t.id = q.topic_id
       WHERE att.finished = true
         AND jsonb_array_length(att.answers) > 0
-        ${modeFilter}
       GROUP BY q.id, q.text, t.title
       HAVING SUM(CASE WHEN (a->>'isCorrect')::boolean = false THEN 1 ELSE 0 END) > 0
       ORDER BY incorrect_answers DESC, total_answers DESC
@@ -158,6 +299,7 @@ export async function GET(req: NextRequest) {
         worstScore: summaryRow?.worstScore ?? null,
       },
       byTopic,
+      byTopicTrain,
       hardestQuestions,
     });
   } catch (err: unknown) {

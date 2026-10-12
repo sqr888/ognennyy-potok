@@ -29,5 +29,11 @@ Thumbs.db
 
 # misc
 *.tsbuildinfo
-next-env.d.tstree.txt
 next-env.d.ts
+tree.txt
+
+# local DB dumps
+*.sql
+
+# docs (если не нужны в репозитории)
+doc/

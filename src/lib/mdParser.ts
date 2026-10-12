@@ -14,6 +14,8 @@ export interface ParsedQuestion {
 
 export interface ParsedChapter {
   title: string;
+  /** Номер главы из заголовка файла (например, «1» из «# Глава 1. Название»). null — если номера нет. */
+  orderIndex: number | null;
   questions: ParsedQuestion[];
 }
 
@@ -47,12 +49,6 @@ export function parseMarkdownChapter(content: string): ParsedChapter {
 
   // --- Extract chapter title ---
   const titleRegex = /^\s*#{0,3}\s*(?:Глава|Тема)(?:\s|:|$).*$/i;
-  console.log("=== mdParser DEBUG ===");
-  console.log("titleRegex.source =", titleRegex.source);
-  console.log("lines.length =", lines.length);
-  console.log("lines[0] =", JSON.stringify(lines[0]));
-  console.log("lines[0].trim() =", JSON.stringify((lines[0] ?? "").trim()));
-  console.log("regex.test =", titleRegex.test((lines[0] ?? "").trim()));
   const titleLine = lines.find((l) => titleRegex.test(l.trim()));
 
   if (!titleLine) {
@@ -62,6 +58,18 @@ export function parseMarkdownChapter(content: string): ParsedChapter {
         `Первая строка файла: "${lines[0]?.slice(0, 80) ?? ""}"`
     );
   }
+
+  // Пытаемся вытащить номер главы из заголовка.
+  // Примеры, где номер есть:
+  //   # Глава 1. Название
+  //   # Глава 1: Название
+  //   ## Тема 5 - Название
+  //   Глава 12. Название
+  // Если номера нет (например, «# Глава: Название») — вернём null.
+  const orderIndexMatch = titleLine.match(
+    /^\s*#{0,3}\s*(?:Глава|Тема)\s*(\d+)\b/i
+  );
+  const orderIndex = orderIndexMatch ? Number(orderIndexMatch[1]) : null;
 
   const title = titleLine
     .replace(/^\s*#{0,3}\s*/, "")
@@ -102,7 +110,7 @@ export function parseMarkdownChapter(content: string): ParsedChapter {
     parseQuestionBlock(block, idx + 1)
   );
 
-  return { title, questions };
+    return { title, orderIndex, questions };
 }
 
 function parseQuestionBlock(block: string, qNum: number): ParsedQuestion {

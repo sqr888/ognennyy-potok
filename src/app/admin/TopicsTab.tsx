@@ -89,8 +89,17 @@ export default function TopicsTab() {
     if (!confirm("Удалить тему и все её вопросы?")) return;
     setDeleteId(id);
     try {
-      await fetch(`/api/admin/topics/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/topics/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error ?? "Не удалось удалить тему");
+        return;
+      }
       await fetchTopics();
+    } catch {
+      alert("Ошибка соединения");
     } finally {
       setDeleteId(null);
     }

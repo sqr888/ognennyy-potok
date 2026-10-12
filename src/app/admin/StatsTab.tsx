@@ -22,6 +22,23 @@ interface TopicStat {
   errorRate: number;
 }
 
+interface TopicTrainStat {
+  topicId: number;
+  topicTitle: string;
+  topicOrder: number;
+  attemptsCount: number;
+  totalAnswers: number;
+  totalCorrect: number;
+  totalIncorrect: number;
+  averagePercent: number;
+  bestCorrect: number | null;
+  worstCorrect: number | null;
+  lastAnswers: number | null;
+  lastIncorrect: number | null;
+  lastPercent: number | null;
+  lastAt: string | null;
+}
+
 interface HardestQuestion {
   questionId: number;
   questionText: string;
@@ -35,6 +52,7 @@ interface StatsResponse {
   mode: string;
   summary: Summary;
   byTopic: TopicStat[];
+  byTopicTrain: TopicTrainStat[];
   hardestQuestions: HardestQuestion[];
 }
 
@@ -179,8 +197,9 @@ export default function StatsTab() {
 
   if (!data) return null;
 
-  const { summary, byTopic, hardestQuestions } = data;
+  const { summary, byTopic, byTopicTrain, hardestQuestions } = data;
 
+  // ── Пустое состояние ───────────────────────────────────────────────────
   if (summary.totalAttempts === 0) {
     const modeLabel = (
       {
@@ -226,90 +245,211 @@ export default function StatsTab() {
       {Header}
       {ModeTabs}
 
-      <div className={gridClass}>
-        <SummaryCard
-          label="Всего попыток"
-          value={summary.totalAttempts}
-          hint={`завершено: ${summary.finishedAttempts}`}
-        />
-        <SummaryCard
-          label="Средний результат"
-          value={`${summary.averagePercent}%`}
-          hint={avgTotalLabel}
-          accent="blue"
-        />
-        {showPassedCard && (
+      {/* ── Верхние карточки — только для теста и экзамена ─────────────── */}
+      {mode !== "train" && (
+        <div className={gridClass}>
+          <SummaryCard
+            label="Всего попыток"
+            value={summary.totalAttempts}
+            hint={`завершено: ${summary.finishedAttempts}`}
+          />
+          <SummaryCard
+            label="Средний результат"
+            value={`${summary.averagePercent}%`}
+            hint={avgTotalLabel}
+            accent="blue"
+          />
           <SummaryCard
             label="Сдали тест"
             value={`${summary.passedCount}`}
             hint={`${passRate}% от завершённых`}
             accent="green"
           />
-        )}
-        <SummaryCard
-          label="Лучший / худший"
-          value={`${summary.bestScore ?? 0} / ${summary.worstScore ?? 0}`}
-          hint={bestWorstHint}
-        />
-      </div>
+          <SummaryCard
+            label="Лучший / худший"
+            value={`${summary.bestScore ?? 0} / ${summary.worstScore ?? 0}`}
+            hint={bestWorstHint}
+          />
+        </div>
+      )}
 
-      <section className="mb-8">
-        <h3 className="text-lg font-semibold text-slate-700 mb-3">
-          Ошибки по темам
-        </h3>
-        {byTopic.length === 0 ? (
-          <div className="card text-center py-8 text-slate-400">
-            Нет данных по темам
-          </div>
-        ) : (
-          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
-                  <th className="px-4 py-2 font-medium">Тема</th>
-                  <th className="px-4 py-2 font-medium text-right w-24">
-                    Ответов
-                  </th>
-                  <th className="px-4 py-2 font-medium text-right w-28">
-                    Ошибок
-                  </th>
-                  <th className="px-4 py-2 font-medium text-right w-24">
-                    % ошибок
-                  </th>
-                  <th className="px-4 py-2 font-medium w-40"> </th>
-                </tr>
-              </thead>
-              <tbody>
-                {byTopic.map((t) => (
-                  <tr
-                    key={t.topicId}
-                    className="border-b border-slate-100 last:border-0"
-                  >
-                    <td className="px-4 py-2 text-slate-800">
-                      {t.topicOrder}. {t.topicTitle}
-                    </td>
-                    <td className="px-4 py-2 text-right text-slate-600">
-                      {t.totalAnswers}
-                    </td>
-                    <td className="px-4 py-2 text-right text-slate-600">
-                      {t.incorrectAnswers}
-                    </td>
-                    <td className="px-4 py-2 text-right font-medium">
-                      <span className={errorColor(t.errorRate)}>
-                        {t.errorRate.toFixed(1)}%
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">
-                      <ErrorBar value={t.errorRate} />
-                    </td>
+      {/* ── Статистика по темам ────────────────────────────────────────── */}
+      {mode === "train" ? (
+        <section className="mb-8">
+          <h3 className="text-lg font-semibold text-slate-700 mb-3">
+            Статистика по темам
+          </h3>
+          {byTopicTrain.length === 0 ? (
+            <div className="card text-center py-8 text-slate-400">
+              Нет данных по темам
+            </div>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden overflow-x-auto">
+              <table className="w-full text-sm min-w-[800px]">
+                 <thead>
+                  {/* Верхняя строка: группы колонок */}
+                  <tr className="text-xs uppercase tracking-wider">
+                    <th
+                      rowSpan={2}
+                      className="px-4 py-3 text-center font-semibold text-slate-700 align-middle bg-slate-100 border-r border-slate-200 whitespace-nowrap"
+                    >
+                      Тема
+                    </th>
+                    <th
+                      colSpan={3}
+                      className="px-4 py-2 text-center font-semibold text-blue-700 bg-blue-50 border-r border-slate-200"
+                    >
+                      Все попытки
+                    </th>
+                    <th
+                      colSpan={3}
+                      className="px-4 py-2 text-center font-semibold text-emerald-700 bg-emerald-50"
+                    >
+                      Последняя попытка
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                  {/* Нижняя строка: имена колонок */}
+                  <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                    <th className="px-4 py-2 text-center font-medium w-20 bg-blue-50/50">
+                      Попыток
+                    </th>
+                    <th className="px-4 py-2 text-center font-medium w-24 bg-blue-50/50">
+                      Средний
+                    </th>
+                    <th className="px-4 py-2 text-center font-medium w-32 bg-blue-50/50 border-r border-slate-200">
+                      Лучшая / Худшая
+                    </th>
+                    <th className="px-4 py-2 text-center font-medium w-20 bg-emerald-50/50">
+                      Ответов
+                    </th>
+                    <th className="px-4 py-2 text-center font-medium w-20 bg-emerald-50/50">
+                      Ошибок
+                    </th>
+                    <th className="px-4 py-2 text-center font-medium w-24 bg-emerald-50/50">
+                      % ошибок
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {byTopicTrain.map((t) => (
+                    <tr
+                      key={t.topicId}
+                      className="border-b border-slate-100 last:border-0"
+                    >
+                      <td className="px-4 py-2 text-left text-slate-800 border-r border-slate-100 whitespace-nowrap">
+                        {t.topicOrder}. {t.topicTitle}
+                      </td>
+                      <td className="px-4 py-2 text-center text-slate-600">
+                        {t.attemptsCount}
+                      </td>
+                      <td className="px-4 py-2 text-center font-medium">
+                        <span className={percentColor(t.averagePercent)}>
+                          {t.averagePercent}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-center border-r border-slate-100 whitespace-nowrap">
+                        {t.bestCorrect !== null ? (
+                          <span className="text-green-700 font-medium">
+                            {t.bestCorrect}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                        <span className="text-slate-300 mx-2">/</span>
+                        {t.worstCorrect !== null ? (
+                          <span className="text-red-700 font-medium">
+                            {t.worstCorrect}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-center text-slate-600">
+                        {t.lastAnswers ?? "—"}
+                      </td>
+                      <td className="px-4 py-2 text-center text-slate-600">
+                        {t.lastIncorrect ?? "—"}
+                      </td>
+                      <td className="px-4 py-2 text-center font-medium">
+                        {t.lastPercent !== null ? (
+                          <span className={errorColor(t.lastPercent)}>
+                            {t.lastPercent}%
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="text-xs text-slate-400 mt-2">
+            Учитываются только завершённые тренировки, где ответы даны на все
+            вопросы.
+          </p>
+        </section>
+      ) : (
+        <section className="mb-8">
+          <h3 className="text-lg font-semibold text-slate-700 mb-3">
+            Ошибки по темам
+          </h3>
+          {byTopic.length === 0 ? (
+            <div className="card text-center py-8 text-slate-400">
+              Нет данных по темам
+            </div>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
+                    <th className="px-4 py-2 font-medium">Тема</th>
+                    <th className="px-4 py-2 font-medium text-right w-24">
+                      Ответов
+                    </th>
+                    <th className="px-4 py-2 font-medium text-right w-28">
+                      Ошибок
+                    </th>
+                    <th className="px-4 py-2 font-medium text-right w-24">
+                      % ошибок
+                    </th>
+                    <th className="px-4 py-2 font-medium w-40"> </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {byTopic.map((t) => (
+                    <tr
+                      key={t.topicId}
+                      className="border-b border-slate-100 last:border-0"
+                    >
+                      <td className="px-4 py-2 text-slate-800">
+                        {t.topicOrder}. {t.topicTitle}
+                      </td>
+                      <td className="px-4 py-2 text-right text-slate-600">
+                        {t.totalAnswers}
+                      </td>
+                      <td className="px-4 py-2 text-right text-slate-600">
+                        {t.incorrectAnswers}
+                      </td>
+                      <td className="px-4 py-2 text-right font-medium">
+                        <span className={errorColor(t.errorRate)}>
+                          {t.errorRate.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        <ErrorBar value={t.errorRate} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
+      {/* ── Самые сложные вопросы — общая агрегация ────────────────────── */}
       <section>
         <h3 className="text-lg font-semibold text-slate-700 mb-3">
           Самые сложные вопросы
@@ -406,6 +546,15 @@ function ErrorBar({ value }: { value: number }) {
   );
 }
 
+/** Цвет по проценту правильных ответов (чем больше — тем лучше) */
+function percentColor(percent: number): string {
+  if (percent >= 80) return "text-green-600";
+  if (percent >= 60) return "text-yellow-600";
+  if (percent >= 40) return "text-orange-600";
+  return "text-red-600";
+}
+
+/** Цвет по проценту ошибок (чем меньше — тем лучше) */
 function errorColor(rate: number): string {
   if (rate < 20) return "text-green-600";
   if (rate < 40) return "text-yellow-600";
